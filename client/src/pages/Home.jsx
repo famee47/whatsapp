@@ -266,22 +266,46 @@ export default function Home() {
   const conversationsRef = useRef(conversations);
   const groupsRef = useRef(groups);
   const messagesRef = useRef(messages);
-  const longPressTimer = useRef(null); // for chat list long-press on mobile
   const socket = getSocket();
 
-  /* ── Chat list long-press (mobile) ── */
+  /* ── Round 2 state ── */
+  const [showPrivacySettings, setShowPrivacySettings] = useState(false);
+  const [privacyForm, setPrivacyForm] = useState({
+    hideOnlineStatus: user?.privacy?.hideOnlineStatus || false,
+    hideReadReceipts: user?.privacy?.hideReadReceipts || false,
+    hideLastSeen: user?.privacy?.hideLastSeen || false,
+    statusVisibility: user?.privacy?.statusVisibility || 'contacts',
+  });
+  const [sessions, setSessions] = useState([]);
+  const [showSessions, setShowSessions] = useState(false);
+  const [pinLockModal, setPinLockModal] = useState(null); // chatId to lock
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [lockedChats, setLockedChats] = useState(user?.lockedChats || []);
+  const [unlockedChats, setUnlockedChats] = useState({}); // chatId -> true (unlocked this session)
+  const [pinVerifyModal, setPinVerifyModal] = useState(null); // { chatId, onSuccess }
+
+  /* ── Long press for chat list (mobile) ── */
+  const longPressTimer = useRef(null);
+  const longPressPos = useRef({ x: 0, y: 0 });
+
+  /* ── Chat list long-press (mobile — improved: cancel if finger moves) ── */
   const handleChatLongPressStart = (e, item, isDM) => {
-    // Prevent if it's a scroll gesture
+    const touch = e.touches?.[0];
+    longPressPos.current = { x: touch?.clientX || 0, y: touch?.clientY || 0 };
     longPressTimer.current = setTimeout(() => {
-      const touch = e.touches?.[0];
-      const x = touch ? touch.clientX : e.clientX;
-      const y = touch ? touch.clientY : e.clientY;
-      setChatCtxMenu({ x, y, item, isDM });
+      setChatCtxMenu({ x: longPressPos.current.x, y: longPressPos.current.y, item, isDM });
     }, 500);
   };
-  const handleChatLongPressEnd = () => {
-    clearTimeout(longPressTimer.current);
+  const handleChatLongPressMove = (e) => {
+    const touch = e.touches?.[0];
+    if (!touch) return;
+    const dx = Math.abs(touch.clientX - longPressPos.current.x);
+    const dy = Math.abs(touch.clientY - longPressPos.current.y);
+    // If finger moved more than 8px, cancel long press (user is scrolling)
+    if (dx > 8 || dy > 8) clearTimeout(longPressTimer.current);
   };
+  const handleChatLongPressEnd = () => { clearTimeout(longPressTimer.current); };
 
   /* ── Keep refs fresh ── */
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
@@ -351,7 +375,21 @@ export default function Home() {
       handle('newMessage', (msg) => {
         const cid = msg.conversationId;
         setMessages(prev => prev.find(m=>m._id===msg._id) ? prev : [...prev, msg]);
-        setConversations(prev => prev.map(c=>c._id===cid?{...c,lastMessage:msg,updatedAt:msg.createdAt}:c).sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt)));
+        setConversations(prev => {
+          const exists = prev.find(c=>c._id===cid);
+          if (exists) {
+            // Update existing conversation
+            return prev.map(c=>c._id===cid?{...c,lastMessage:msg,updatedAt:msg.createdAt}:c)
+              .sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt));
+          } else {
+            // Conversation was deleted or not loaded — fetch it and add back
+            convAPI.getAll().then(r => {
+              const all = Array.isArray(r.data) ? r.data : [];
+              setConversations(all);
+            }).catch(()=>{});
+            return prev;
+          }
+        });
         if (activeChatRef.current?.data?._id===cid && socket) {
           socket.emit('messageSeen', { conversationId:cid, senderId:msg.senderId?._id||msg.senderId });
         } else { incrementUnread(cid); }
@@ -402,6 +440,12 @@ export default function Home() {
      CHAT OPEN
   ════════════════════════════════════════════════════════════════════ */
   const openDM = async (conv) => {
+    // Check if chat is locked and not yet unlocked this session
+    if (lockedChats.includes(conv._id) && !unlockedChats[conv._id]) {
+      setPinInput(''); setPinError('');
+      setPinVerifyModal({ chatId: conv._id, onSuccess: () => openDM(conv) });
+      return;
+    }
     // Save draft for current chat
     if (activeChat?.data?._id && messageText) saveDraft(activeChat.data._id, messageText);
     setActiveChat({ type:'dm', data:conv });
@@ -1087,8 +1131,8 @@ export default function Home() {
                   className={`w-full flex items-center gap-3 px-3 py-3 border-b border-[#2a3942]/20 ${isActive?'bg-[#2a3942]':'hover:bg-[#202c33]'} transition-colors`}
                   onContextMenu={e=>{e.preventDefault();setChatCtxMenu({x:e.clientX,y:e.clientY,item:group,isDM:false});}}
                   onTouchStart={e=>handleChatLongPressStart(e,group,false)}
-                  onTouchEnd={handleChatLongPressEnd}
-                  onTouchMove={handleChatLongPressEnd}>
+                  onTouchMove={handleChatLongPressMove}
+                  onTouchEnd={handleChatLongPressEnd}>
                   <button onClick={()=>openGroup(group)} className="relative flex-shrink-0">
                     <div className="w-12 h-12 bg-[#2a3942] rounded-full flex items-center justify-center text-2xl overflow-hidden">
                       {group.groupPicture?<img src={group.groupPicture} className="w-12 h-12 rounded-full object-cover"/>:'👥'}
@@ -1151,8 +1195,8 @@ export default function Home() {
                   onClick={()=>isDM?openDM(item):openGroup(item)}
                   onContextMenu={e=>{e.preventDefault();e.stopPropagation();setChatCtxMenu({x:e.clientX,y:e.clientY,item,isDM});}}
                   onTouchStart={e=>handleChatLongPressStart(e,item,isDM)}
+                  onTouchMove={handleChatLongPressMove}
                   onTouchEnd={handleChatLongPressEnd}
-                  onTouchMove={handleChatLongPressEnd}
                   className={`w-full flex items-center gap-3 px-3 py-3 hover:bg-[#2a3942] transition-colors border-b border-[#2a3942]/20 ${isActive?'bg-[#2a3942]':''} text-left`}>
                   <div className="relative flex-shrink-0">
                     {isDM
@@ -1172,6 +1216,7 @@ export default function Home() {
                       <div className="flex items-center gap-1 min-w-0">
                         {pinned && <span className="text-[#00a884] text-xs flex-shrink-0">📌</span>}
                         {muted && <span className="text-[#8696a0] text-xs flex-shrink-0">🔇</span>}
+                        {lockedChats.includes(item._id) && !unlockedChats[item._id] && <span className="text-[#8696a0] text-xs flex-shrink-0">🔒</span>}
                         <span className={`text-sm truncate ${unread>0?'text-[#e9edef] font-semibold':'text-[#e9edef] font-medium'}`}>{displayName}</span>
                       </div>
                       <span className={`text-xs flex-shrink-0 ${unread>0?'text-[#00a884]':'text-[#8696a0]'}`}>{fmtConvTime(item.updatedAt)}</span>
@@ -1565,6 +1610,18 @@ export default function Home() {
                 <button onClick={()=>{setMuteModal(chatCtxMenu.item._id);setChatCtxMenu(null);}} className="w-full px-4 py-2.5 text-left text-sm text-[#e9edef] hover:bg-[#2a3942]">
                   {isMuted(chatCtxMenu.item._id)?'🔊 Unmute':'🔇 Mute'}
                 </button>
+                <button onClick={()=>{
+                  const cid = chatCtxMenu.item._id;
+                  if (lockedChats.includes(cid)) {
+                    // unlock
+                    userAPI.lockChat(cid, null).then(r=>{ setLockedChats(r.data.lockedChats||[]); toast.success('Chat unlocked'); }).catch(()=>toast.error('Failed.'));
+                  } else {
+                    setPinLockModal(cid); setPinInput(''); setPinError('');
+                  }
+                  setChatCtxMenu(null);
+                }} className="w-full px-4 py-2.5 text-left text-sm text-[#e9edef] hover:bg-[#2a3942]">
+                  {lockedChats.includes(chatCtxMenu.item._id) ? '🔓 Unlock Chat' : '🔒 Lock Chat'}
+                </button>
                 <button onClick={()=>deleteChatForMe(chatCtxMenu.item._id)} className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-[#2a3942]">
                   🗑️ Delete chat
                 </button>
@@ -1701,10 +1758,10 @@ export default function Home() {
               <button onClick={()=>setShowSettings(false)} className="text-[#8696a0] hover:text-white text-2xl">×</button>
             </div>
             {/* Settings tabs */}
-            <div className="flex border-b border-[#2a3942]">
-              {[{id:'profile',label:'Profile'},{id:'password',label:'Password'},{id:'delete',label:'Delete Account'}].map(t=>(
-                <button key={t.id} onClick={()=>setSettingsTab(t.id)}
-                  className={`flex-1 py-2.5 text-xs font-medium transition-colors border-b-2 ${settingsTab===t.id?'text-[#00a884] border-[#00a884]':'text-[#8696a0] border-transparent'}`}>
+            <div className="flex border-b border-[#2a3942] overflow-x-auto scrollbar-hide">
+              {[{id:'profile',label:'Profile'},{id:'password',label:'Password'},{id:'privacy',label:'Privacy'},{id:'sessions',label:'Sessions'},{id:'delete',label:'Delete'}].map(t=>(
+                <button key={t.id} onClick={()=>{setSettingsTab(t.id);if(t.id==='sessions'){userAPI.getSessions().then(r=>setSessions(r.data?.sessions||[])).catch(()=>{});}}}
+                  className={`flex-shrink-0 px-3 py-2.5 text-xs font-medium transition-colors border-b-2 ${settingsTab===t.id?'text-[#00a884] border-[#00a884]':'text-[#8696a0] border-transparent'}`}>
                   {t.label}
                 </button>
               ))}
@@ -1748,6 +1805,92 @@ export default function Home() {
                     className="w-full py-3 bg-[#00a884] hover:bg-[#00c79a] disabled:opacity-50 text-white rounded-xl font-bold text-sm">
                     {pwLoading?'Changing...':'Change Password'}
                   </button>
+                </>
+              )}
+              {settingsTab==='privacy' && (
+                <>
+                  <p className="text-[#8696a0] text-xs mb-3">Control who can see your information</p>
+                  {/* Online Status */}
+                  <div className="bg-[#202c33] rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-[#e9edef] text-sm font-medium">Hide Online Status</p>
+                      <p className="text-[#8696a0] text-xs">Others won't see when you're online</p>
+                    </div>
+                    <button onClick={()=>setPrivacyForm(p=>({...p,hideOnlineStatus:!p.hideOnlineStatus}))}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${privacyForm.hideOnlineStatus?'bg-[#00a884]':'bg-[#2a3942]'}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${privacyForm.hideOnlineStatus?'left-6':'left-0.5'}`}/>
+                    </button>
+                  </div>
+                  {/* Last Seen */}
+                  <div className="bg-[#202c33] rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-[#e9edef] text-sm font-medium">Hide Last Seen</p>
+                      <p className="text-[#8696a0] text-xs">Others won't see when you were last active</p>
+                    </div>
+                    <button onClick={()=>setPrivacyForm(p=>({...p,hideLastSeen:!p.hideLastSeen}))}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${privacyForm.hideLastSeen?'bg-[#00a884]':'bg-[#2a3942]'}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${privacyForm.hideLastSeen?'left-6':'left-0.5'}`}/>
+                    </button>
+                  </div>
+                  {/* Read Receipts */}
+                  <div className="bg-[#202c33] rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-[#e9edef] text-sm font-medium">Hide Read Receipts</p>
+                      <p className="text-[#8696a0] text-xs">Blue ticks won't show when you read messages</p>
+                    </div>
+                    <button onClick={()=>setPrivacyForm(p=>({...p,hideReadReceipts:!p.hideReadReceipts}))}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${privacyForm.hideReadReceipts?'bg-[#00a884]':'bg-[#2a3942]'}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${privacyForm.hideReadReceipts?'left-6':'left-0.5'}`}/>
+                    </button>
+                  </div>
+                  {/* Status Visibility */}
+                  <div className="bg-[#202c33] rounded-xl p-3">
+                    <p className="text-[#e9edef] text-sm font-medium mb-2">Who can see my Status</p>
+                    <div className="flex gap-2">
+                      {['everyone','contacts','nobody'].map(v=>(
+                        <button key={v} onClick={()=>setPrivacyForm(p=>({...p,statusVisibility:v}))}
+                          className={`flex-1 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${privacyForm.statusVisibility===v?'bg-[#00a884] text-white':'bg-[#2a3942] text-[#8696a0]'}`}>
+                          {v}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button onClick={async()=>{
+                    try {
+                      const {data} = await userAPI.updatePrivacy(privacyForm);
+                      updateUser({ privacy: data.privacy });
+                      toast.success('Privacy settings saved!');
+                      setShowSettings(false);
+                    } catch { toast.error('Failed.'); }
+                  }} className="w-full py-3 bg-[#00a884] hover:bg-[#00c79a] text-white rounded-xl font-bold text-sm">Save Privacy Settings</button>
+                </>
+              )}
+              {settingsTab==='sessions' && (
+                <>
+                  <p className="text-[#8696a0] text-xs mb-3">Devices where you're logged in</p>
+                  {sessions.length === 0 ? (
+                    <div className="text-center py-6">
+                      <p className="text-3xl mb-2">📱</p>
+                      <p className="text-[#8696a0] text-sm">No session data available</p>
+                      <p className="text-[#8696a0] text-xs mt-1">Session tracking requires a server update</p>
+                    </div>
+                  ) : sessions.map(s=>(
+                    <div key={s._id} className="bg-[#202c33] rounded-xl p-3 flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[#e9edef] text-sm font-medium truncate">{s.device || 'Unknown Device'}</p>
+                        <p className="text-[#8696a0] text-xs">{s.ip || ''} · {s.lastActive ? new Date(s.lastActive).toLocaleDateString() : 'Unknown'}</p>
+                      </div>
+                      <button onClick={async()=>{
+                        try { await userAPI.revokeSession(s._id); setSessions(p=>p.filter(x=>x._id!==s._id)); toast.success('Session revoked'); }
+                        catch { toast.error('Failed.'); }
+                      }} className="text-red-400 hover:text-red-300 text-xs font-medium ml-2 flex-shrink-0">Revoke</button>
+                    </div>
+                  ))}
+                  <button onClick={async()=>{
+                    if (!window.confirm('Log out from all other devices?')) return;
+                    try { await userAPI.revokeAllSessions(); toast.success('All sessions revoked. Please log in again.'); setTimeout(()=>logout(), 1500); }
+                    catch { toast.error('Failed.'); }
+                  }} className="w-full py-3 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-xl font-bold text-sm">Log Out All Devices</button>
                 </>
               )}
               {settingsTab==='delete' && (
@@ -2166,6 +2309,73 @@ export default function Home() {
               {selectedGroupMembers.length>0&&<p className="text-[#00a884] text-xs">{selectedGroupMembers.length} member(s) selected</p>}
               <button onClick={createGroup} disabled={!groupForm.name.trim()||selectedGroupMembers.length<1}
                 className="w-full py-3 bg-[#00a884] hover:bg-[#00c79a] disabled:opacity-50 text-white rounded-xl font-bold text-sm">Create Group</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Lock Modal */}
+      {pinLockModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={()=>setPinLockModal(null)}>
+          <div className="bg-[#111b21] rounded-2xl w-full max-w-xs overflow-hidden shadow-2xl" onClick={e=>e.stopPropagation()}>
+            <div className="bg-[#202c33] px-4 py-4 flex items-center justify-between">
+              <h2 className="text-[#e9edef] font-semibold">🔒 Lock Chat</h2>
+              <button onClick={()=>setPinLockModal(null)} className="text-[#8696a0] hover:text-white text-2xl">×</button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-[#8696a0] text-xs">Enter a 4-digit PIN to lock this chat. You'll need it to open the chat.</p>
+              <input type="password" inputMode="numeric" maxLength={4} value={pinInput} autoFocus
+                onChange={e=>setPinInput(e.target.value.replace(/\D/g,''))}
+                placeholder="Enter 4-digit PIN"
+                className="w-full px-4 py-3 bg-[#202c33] rounded-xl text-[#e9edef] placeholder-[#8696a0] outline-none focus:ring-2 ring-[#00a884] text-sm text-center tracking-widest text-lg"/>
+              {pinError && <p className="text-red-400 text-xs text-center">{pinError}</p>}
+              <button onClick={async()=>{
+                if (pinInput.length !== 4) { setPinError('PIN must be 4 digits'); return; }
+                try {
+                  const {data} = await userAPI.lockChat(pinLockModal, pinInput);
+                  setLockedChats(data.lockedChats || []);
+                  toast.success('Chat locked 🔒');
+                  setPinLockModal(null); setPinInput('');
+                } catch(e) { setPinError(e?.response?.data?.message || 'Failed.'); }
+              }} disabled={pinInput.length!==4}
+                className="w-full py-3 bg-[#00a884] hover:bg-[#00c79a] disabled:opacity-50 text-white rounded-xl font-bold text-sm">Lock Chat</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Verify Modal (to open a locked chat) */}
+      {pinVerifyModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={()=>setPinVerifyModal(null)}>
+          <div className="bg-[#111b21] rounded-2xl w-full max-w-xs overflow-hidden shadow-2xl" onClick={e=>e.stopPropagation()}>
+            <div className="bg-[#202c33] px-4 py-4">
+              <h2 className="text-[#e9edef] font-semibold">🔒 Locked Chat</h2>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-[#8696a0] text-xs text-center">Enter your PIN to open this chat</p>
+              <input type="password" inputMode="numeric" maxLength={4} value={pinInput} autoFocus
+                onChange={e=>setPinInput(e.target.value.replace(/\D/g,''))}
+                onKeyDown={async e=>{
+                  if (e.key==='Enter' && pinInput.length===4) {
+                    try {
+                      const {data} = await userAPI.verifyPin(pinInput);
+                      if (data.valid) { setUnlockedChats(p=>({...p,[pinVerifyModal.chatId]:true})); pinVerifyModal.onSuccess(); setPinVerifyModal(null); setPinInput(''); setPinError(''); }
+                      else setPinError('Wrong PIN');
+                    } catch { setPinError('Wrong PIN'); }
+                  }
+                }}
+                placeholder="••••"
+                className="w-full px-4 py-3 bg-[#202c33] rounded-xl text-[#e9edef] placeholder-[#8696a0] outline-none focus:ring-2 ring-[#00a884] text-sm text-center tracking-widest text-2xl"/>
+              {pinError && <p className="text-red-400 text-xs text-center">{pinError}</p>}
+              <button onClick={async()=>{
+                if (pinInput.length!==4) { setPinError('PIN must be 4 digits'); return; }
+                try {
+                  const {data} = await userAPI.verifyPin(pinInput);
+                  if (data.valid) { setUnlockedChats(p=>({...p,[pinVerifyModal.chatId]:true})); pinVerifyModal.onSuccess(); setPinVerifyModal(null); setPinInput(''); setPinError(''); }
+                  else setPinError('Wrong PIN. Try again.');
+                } catch { setPinError('Wrong PIN. Try again.'); }
+              }} disabled={pinInput.length!==4}
+                className="w-full py-3 bg-[#00a884] hover:bg-[#00c79a] disabled:opacity-50 text-white rounded-xl font-bold text-sm">Open Chat</button>
             </div>
           </div>
         </div>

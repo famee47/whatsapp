@@ -21,12 +21,8 @@ exports.getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('_id username displayName profilePicture bio customStatus isOnline lastSeen createdAt blockedUsers privacy isDeleted');
     if (!user) return res.status(404).json({ message: 'User not found.' });
-    // Respect privacy: hide online/lastSeen if user has hideOnlineStatus
     const result = user.toObject();
-    if (user.privacy?.hideOnlineStatus) {
-      result.isOnline = false;
-      result.lastSeen = null;
-    }
+    if (user.privacy?.hideOnlineStatus) { result.isOnline = false; result.lastSeen = null; }
     res.json(result);
   } catch { res.status(500).json({ message: 'Failed to get user.' }); }
 };
@@ -68,7 +64,6 @@ exports.getContacts = async (req, res) => {
   try {
     const me = await User.findById(req.user._id)
       .populate('contacts.user', '_id username displayName profilePicture bio customStatus isOnline lastSeen privacy isDeleted');
-    // Filter out deleted users gracefully
     const contacts = (me.contacts || []).filter(c => c.user != null);
     res.json(contacts);
   } catch { res.status(500).json({ message: 'Failed to get contacts.' }); }
@@ -104,7 +99,7 @@ exports.pinChat = async (req, res) => {
 // ── MUTE CHAT ─────────────────────────────────────────────────────────────────
 exports.muteChat = async (req, res) => {
   try {
-    const { chatId, duration } = req.body; // duration: '8h' | '1w' | 'always' | 'unmute'
+    const { chatId, duration } = req.body;
     const me = await User.findById(req.user._id);
     if (duration === 'unmute') {
       me.mutedChats.delete(chatId);
@@ -112,7 +107,6 @@ exports.muteChat = async (req, res) => {
       let unmuteAt = null;
       if (duration === '8h') unmuteAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
       else if (duration === '1w') unmuteAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      else if (duration === 'always') unmuteAt = null; // null means always muted
       me.mutedChats.set(chatId, { unmuteAt, duration });
     }
     await me.save();
@@ -125,9 +119,10 @@ exports.deleteChat = async (req, res) => {
   try {
     const { chatId } = req.body;
     const me = await User.findById(req.user._id);
-    if (!me.deletedChats.includes(chatId)) me.deletedChats.push(chatId);
-    // Also unpin
-    me.pinnedChats = me.pinnedChats.filter(id => id !== chatId);
+    // Store as string to keep consistent
+    const idStr = chatId.toString();
+    if (!me.deletedChats.includes(idStr)) me.deletedChats.push(idStr);
+    me.pinnedChats = me.pinnedChats.filter(id => id !== idStr);
     await me.save();
     res.json({ ok: true });
   } catch { res.status(500).json({ message: 'Failed to delete chat.' }); }
@@ -138,16 +133,12 @@ exports.lockChat = async (req, res) => {
   try {
     const { chatId, pin } = req.body;
     const me = await User.findById(req.user._id).select('+chatPin');
-
     if (!me.chatPin && pin) {
-      // Set PIN for first time
       me.chatPin = await bcrypt.hash(pin, 10);
     } else if (pin && me.chatPin) {
-      // Verify PIN
       const valid = await bcrypt.compare(pin, me.chatPin);
       if (!valid) return res.status(401).json({ message: 'Wrong PIN.' });
     }
-
     if (me.lockedChats.includes(chatId)) {
       me.lockedChats = me.lockedChats.filter(id => id !== chatId);
     } else {
@@ -168,14 +159,52 @@ exports.verifyPin = async (req, res) => {
   } catch { res.status(500).json({ message: 'Failed to verify PIN.' }); }
 };
 
+// ── PRIVACY SETTINGS (Round 2) ────────────────────────────────────────────────
 exports.updatePrivacy = async (req, res) => {
   try {
-    const { hideOnlineStatus, hideReadReceipts, statusVisibility } = req.body;
-    const updates = { privacy: {} };
-    if (hideOnlineStatus !== undefined) updates.privacy.hideOnlineStatus = hideOnlineStatus;
-    if (hideReadReceipts !== undefined) updates.privacy.hideReadReceipts = hideReadReceipts;
-    if (statusVisibility !== undefined) updates.privacy.statusVisibility = statusVisibility;
-    const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true });
-    res.json({ privacy: user.privacy });
+    const { hideOnlineStatus, hideReadReceipts, statusVisibility, hideLastSeen } = req.body;
+    const me = await User.findById(req.user._id);
+    if (hideOnlineStatus !== undefined) me.privacy.hideOnlineStatus = hideOnlineStatus;
+    if (hideReadReceipts !== undefined) me.privacy.hideReadReceipts = hideReadReceipts;
+    if (statusVisibility !== undefined) me.privacy.statusVisibility = statusVisibility;
+    if (hideLastSeen !== undefined) me.privacy.hideLastSeen = hideLastSeen;
+    await me.save();
+    res.json({ privacy: me.privacy });
   } catch { res.status(500).json({ message: 'Failed to update privacy.' }); }
+};
+
+// ── ONLINE/OFFLINE TOGGLE (Round 2) ──────────────────────────────────────────
+exports.toggleOnlineVisibility = async (req, res) => {
+  try {
+    const me = await User.findById(req.user._id);
+    me.privacy.hideOnlineStatus = !me.privacy.hideOnlineStatus;
+    await me.save();
+    res.json({ hideOnlineStatus: me.privacy.hideOnlineStatus });
+  } catch { res.status(500).json({ message: 'Failed.' }); }
+};
+
+// ── ACTIVE SESSIONS (Round 2) ─────────────────────────────────────────────────
+exports.getSessions = async (req, res) => {
+  try {
+    const me = await User.findById(req.user._id).select('sessions');
+    res.json({ sessions: me.sessions || [] });
+  } catch { res.status(500).json({ message: 'Failed.' }); }
+};
+
+exports.revokeSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const me = await User.findById(req.user._id);
+    me.sessions = (me.sessions || []).filter(s => s._id.toString() !== sessionId);
+    await me.save();
+    res.json({ ok: true });
+  } catch { res.status(500).json({ message: 'Failed to revoke session.' }); }
+};
+
+exports.revokeAllSessions = async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.user._id, { $set: { sessions: [] } });
+    // Client must logout after this
+    res.json({ ok: true });
+  } catch { res.status(500).json({ message: 'Failed.' }); }
 };

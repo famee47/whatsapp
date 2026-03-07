@@ -8,38 +8,30 @@ const userSchema = new mongoose.Schema({
   displayName: { type: String, default: '', maxlength: 50 },
   profilePicture: { type: String, default: '' },
   bio: { type: String, default: 'Hey there! I am using NumberFree', maxlength: 150 },
-  customStatus: { type: String, default: '', maxlength: 80 }, // "Busy", "At work", custom text
+  customStatus: { type: String, default: '', maxlength: 80 },
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
   isVerified: { type: Boolean, default: true },
-  isDeleted: { type: Boolean, default: false }, // soft delete
-  // Privacy settings
+  isDeleted: { type: Boolean, default: false },
+  // Privacy settings (Round 2: added hideLastSeen)
   privacy: {
     hideOnlineStatus: { type: Boolean, default: false },
     hideReadReceipts: { type: Boolean, default: false },
+    hideLastSeen: { type: Boolean, default: false },
     statusVisibility: { type: String, enum: ['everyone', 'contacts', 'nobody'], default: 'contacts' },
   },
-  // Pinned chats (max 3) - array of conversation/group IDs
   pinnedChats: [{ type: String }],
-  // Muted chats: { chatId: unmuteAt (Date or null for always) }
   mutedChats: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} },
-  // Deleted chats (only for this user)
   deletedChats: [{ type: String }],
-  // Blocked users
   blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  // Contacts
   contacts: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     nickname: { type: String, default: '' }
   }],
-  // Locked chats (PIN protected)
   lockedChats: [{ type: String }],
-  chatPin: { type: String, default: null, select: false }, // hashed 4-digit PIN
-  // Push
+  chatPin: { type: String, default: null, select: false },
   pushSubscription: { type: mongoose.Schema.Types.Mixed, default: null },
-  // Dark/Light mode preference stored server side too
   theme: { type: String, enum: ['dark', 'light'], default: 'dark' },
-  // Active sessions
   sessions: [{
     token: String,
     device: String,

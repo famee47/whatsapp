@@ -12,7 +12,7 @@ api.interceptors.request.use(cfg => {
 
 api.interceptors.response.use(res => res, err => {
   if (err.response?.status === 401) {
-    // Don't redirect when already on login/register — prevents 404 flash on wrong password
+    // Don't redirect when on login/register — prevents 404 flash on wrong password
     const onAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
     if (!onAuthPage) {
       localStorage.removeItem('nf_token');
@@ -46,6 +46,10 @@ export const userAPI = {
   lockChat: (chatId, pin) => api.post('/users/lock-chat', { chatId, pin }),
   verifyPin: (pin) => api.post('/users/verify-pin', { pin }),
   updatePrivacy: (d) => api.put('/users/privacy', d),
+  toggleOnline: () => api.post('/users/toggle-online'),
+  getSessions: () => api.get('/users/sessions'),
+  revokeSession: (sessionId) => api.delete(`/users/sessions/${sessionId}`),
+  revokeAllSessions: () => api.delete('/users/sessions'),
 };
 
 export const convAPI = {

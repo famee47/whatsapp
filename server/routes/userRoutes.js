@@ -12,5 +12,10 @@ router.post('/delete-chat', protect, u.deleteChat);
 router.post('/lock-chat', protect, u.lockChat);
 router.post('/verify-pin', protect, u.verifyPin);
 router.put('/privacy', protect, u.updatePrivacy);
+router.post('/toggle-online', protect, u.toggleOnlineVisibility);
+// Sessions (Round 2)
+router.get('/sessions', protect, u.getSessions);
+router.delete('/sessions/:sessionId', protect, u.revokeSession);
+router.delete('/sessions', protect, u.revokeAllSessions);
 router.get('/:id', protect, u.getUserById);
 module.exports = router;

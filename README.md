@@ -1,57 +1,72 @@
-# NumberFree V6 — Round 2 (Bug Fixes)
+# NumberFree V6 — Round 3 (Bug Fixes + Round 2 Features)
 
-## 3 Bugs Fixed
+## Bug Fixes in this release
 
-### Bug 1 — Wrong password shows 404 and redirects to blank page
-**Root cause:** The axios 401 interceptor was calling `window.location.href = '/login'` even
-when you were already ON the login page. This caused a page reload which showed a 404
-(Vercel can't find the route on reload without proper SPA redirect config).
+### Fix 1 — Delete chat still reappears on refresh
+Root cause: The `$nin` query used ObjectId comparison but `deletedChats` stores strings.
+Fix: `conversationController.js` now casts stored IDs to ObjectId before the query.
 
-**Fix:** `client/src/services/api.js` — interceptor now checks if you're already on
-`/login` or `/register` before redirecting. If you are, it just lets the error pass
-through normally so your toast ("Wrong password") shows up correctly.
+### Fix 2 — When deleted user messages you, old messages show but chat missing from list
+Root cause: When a `newMessage` socket event arrived for a conversation not in the local state
+(because user had deleted it), it was silently ignored.
+Fix: `Home.jsx` socket handler now detects when the conversation is missing from local state
+and re-fetches all conversations from the server to restore it.
 
----
-
-### Bug 2 — Delete chat reappears after page refresh
-**Root cause:** The server's `conversationController.getAll` was fetching ALL conversations
-the user is part of — it never checked the user's `deletedChats` list.
-
-**Fix:** `server/controllers/conversationController.js` — `getAll` now loads the user's
-`deletedChats` array and excludes those IDs from the query using `$nin`.
+### Fix 3 — Mobile can't delete chat (long press not working reliably)
+Root cause: Previous fix used `onTouchMove` to cancel timer, but it fired too aggressively
+and cancelled the timer even for tiny finger wobbles.
+Fix: Now tracks start position and only cancels if finger moves MORE than 8px — so
+accidental micro-movements don't cancel the long press.
 
 ---
 
-### Bug 3 — Can't delete chat on mobile (only works on PC)
-**Root cause:** The chat list items only had `onContextMenu` (right-click), which doesn't
-fire on mobile touchscreens.
+## Round 2 Features
 
-**Fix:** `client/src/pages/Home.jsx` — added `onTouchStart` / `onTouchEnd` / `onTouchMove`
-long-press handlers (500ms hold) to every chat list item, same as the message long-press.
-On mobile: **hold finger for 0.5 seconds** → menu appears with Pin / Mute / Delete.
+### 🔒 Lock Chat with PIN
+- Right-click (PC) or long-press (mobile) any chat → **Lock Chat**
+- Enter a 4-digit PIN → chat shows 🔒 in list
+- Opens with PIN prompt → enter PIN → unlocks for the session
+- PIN is hashed on the server (bcrypt)
+
+### 👁️ Privacy Settings (Settings ⚙️ → Privacy tab)
+- **Hide Online Status** — others won't see your green dot
+- **Hide Last Seen** — others won't see "last seen today at 5:30"
+- **Hide Read Receipts** — blue ticks won't appear when you read messages
+- **Status Visibility** — Everyone / Contacts / Nobody
+
+### 📱 Active Sessions (Settings ⚙️ → Sessions tab)
+- See all devices where you're logged in
+- Revoke individual sessions
+- "Log Out All Devices" button
 
 ---
 
-## Files to Replace (only 3 files this time)
+## Files to Replace (6 files)
 
 ```
-client/src/services/api.js
 client/src/pages/Home.jsx
+client/src/services/api.js
+server/models/User.js
 server/controllers/conversationController.js
+server/controllers/userController.js
+server/routes/userRoutes.js
 ```
 
 ## Deploy
 
-1. Copy the 3 files into your `D:\numberfree` folder (let Windows replace them)
-2. Then:
+1. Copy all 6 files into `D:\numberfree` (let Windows replace them)
+2. Push to GitHub:
 ```
 cd D:\numberfree
 git add .
-git commit -m "r2 bugfixes - 404 login, delete reappear, mobile delete"
+git commit -m "r3 bugfixes + round 2 privacy pin sessions"
 git push
 ```
-3. Wait ~2 min for Render + Vercel to deploy
-4. Test:
-   - Login with wrong password → should show red toast, NOT redirect to blank page ✅
-   - Delete a chat → refresh the page → chat should stay deleted ✅
-   - On mobile, hold a chat for 0.5s → menu should appear ✅
+3. Wait ~2 min for Render + Vercel
+
+## Test
+- Delete a chat → refresh → should stay deleted ✅
+- Long-press a chat on mobile → menu should appear ✅  
+- Lock a chat → 🔒 shows → tap it → PIN prompt ✅
+- Settings → Privacy → toggle hide online → save ✅
+- Settings → Sessions → see logged in devices ✅
