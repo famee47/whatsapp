@@ -1,0 +1,15 @@
+const router = require('express').Router();
+const m = require('../controllers/messageController');
+const { protect } = require('../middleware/authMiddleware');
+router.post('/', protect, m.sendMessage);
+router.get('/starred', protect, m.getStarredMessages);
+router.get('/search', protect, m.searchMessages);
+router.get('/group/:groupId', protect, m.getGroupMessages);
+router.get('/:conversationId', protect, m.getMessages);
+router.put('/seen/:conversationId', protect, m.markSeen);
+router.delete('/:id', protect, m.deleteMessage);
+router.put('/:id/edit', protect, m.editMessage);
+router.put('/:id/react', protect, m.reactToMessage);
+router.put('/:id/star', protect, m.starMessage);
+router.post('/clear', protect, m.clearChatHistory);
+module.exports = router;

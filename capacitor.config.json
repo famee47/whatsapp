@@ -1,0 +1,5 @@
+{
+  "appId": "com.numberfree.app",
+  "appName": "NumberFree",
+  "webDir": "client/dist"
+}

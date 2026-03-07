@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NumberFree</string>
+    <string name="title_activity_main">NumberFree</string>
+    <string name="package_name">com.numberfree.app</string>
+    <string name="custom_url_scheme">com.numberfree.app</string>
+</resources>

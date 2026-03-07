@@ -1,0 +1,16 @@
+const router = require('express').Router();
+const u = require('../controllers/userController');
+const { protect } = require('../middleware/authMiddleware');
+router.get('/search', protect, u.searchUser);
+router.get('/contacts', protect, u.getContacts);
+router.post('/contacts', protect, u.saveContact);
+router.post('/block/:userId', protect, u.blockUser);
+router.get('/blocked/:userId', protect, u.checkBlocked);
+router.post('/pin-chat', protect, u.pinChat);
+router.post('/mute-chat', protect, u.muteChat);
+router.post('/delete-chat', protect, u.deleteChat);
+router.post('/lock-chat', protect, u.lockChat);
+router.post('/verify-pin', protect, u.verifyPin);
+router.put('/privacy', protect, u.updatePrivacy);
+router.get('/:id', protect, u.getUserById);
+module.exports = router;

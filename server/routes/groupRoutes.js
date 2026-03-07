@@ -1,0 +1,16 @@
+const router = require('express').Router();
+const g = require('../controllers/groupController');
+const { protect } = require('../middleware/authMiddleware');
+router.post('/', protect, g.createGroup);
+router.get('/', protect, g.getMyGroups);
+router.put('/:id', protect, g.updateGroup);
+router.delete('/:id', protect, g.deleteGroup);
+router.post('/:id/leave', protect, g.leaveGroup);
+router.post('/:id/members', protect, g.addMember);
+router.delete('/:id/members/:userId', protect, g.removeMember);
+router.post('/:id/make-admin', protect, g.makeAdmin);
+router.delete('/:id/admin/:userId', protect, g.removeAdmin);
+router.post('/:id/invite-link', protect, g.generateInviteLink);
+router.get('/join/:link', protect, g.joinViaLink);
+router.post('/:id/approve', protect, g.approveJoinRequest);
+module.exports = router;
