@@ -12,8 +12,13 @@ api.interceptors.request.use(cfg => {
 
 api.interceptors.response.use(res => res, err => {
   if (err.response?.status === 401) {
-    localStorage.removeItem('nf_token'); localStorage.removeItem('nf_user');
-    window.location.href = '/login';
+    // Don't redirect when already on login/register — prevents 404 flash on wrong password
+    const onAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
+    if (!onAuthPage) {
+      localStorage.removeItem('nf_token');
+      localStorage.removeItem('nf_user');
+      window.location.href = '/login';
+    }
   }
   return Promise.reject(err);
 });

@@ -266,7 +266,22 @@ export default function Home() {
   const conversationsRef = useRef(conversations);
   const groupsRef = useRef(groups);
   const messagesRef = useRef(messages);
+  const longPressTimer = useRef(null); // for chat list long-press on mobile
   const socket = getSocket();
+
+  /* ── Chat list long-press (mobile) ── */
+  const handleChatLongPressStart = (e, item, isDM) => {
+    // Prevent if it's a scroll gesture
+    longPressTimer.current = setTimeout(() => {
+      const touch = e.touches?.[0];
+      const x = touch ? touch.clientX : e.clientX;
+      const y = touch ? touch.clientY : e.clientY;
+      setChatCtxMenu({ x, y, item, isDM });
+    }, 500);
+  };
+  const handleChatLongPressEnd = () => {
+    clearTimeout(longPressTimer.current);
+  };
 
   /* ── Keep refs fresh ── */
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
@@ -1070,7 +1085,10 @@ export default function Home() {
               return (
                 <div key={group._id}
                   className={`w-full flex items-center gap-3 px-3 py-3 border-b border-[#2a3942]/20 ${isActive?'bg-[#2a3942]':'hover:bg-[#202c33]'} transition-colors`}
-                  onContextMenu={e=>{e.preventDefault();setChatCtxMenu({x:e.clientX,y:e.clientY,item:group,isDM:false});}}>
+                  onContextMenu={e=>{e.preventDefault();setChatCtxMenu({x:e.clientX,y:e.clientY,item:group,isDM:false});}}
+                  onTouchStart={e=>handleChatLongPressStart(e,group,false)}
+                  onTouchEnd={handleChatLongPressEnd}
+                  onTouchMove={handleChatLongPressEnd}>
                   <button onClick={()=>openGroup(group)} className="relative flex-shrink-0">
                     <div className="w-12 h-12 bg-[#2a3942] rounded-full flex items-center justify-center text-2xl overflow-hidden">
                       {group.groupPicture?<img src={group.groupPicture} className="w-12 h-12 rounded-full object-cover"/>:'👥'}
@@ -1132,6 +1150,9 @@ export default function Home() {
                 <button key={item._id}
                   onClick={()=>isDM?openDM(item):openGroup(item)}
                   onContextMenu={e=>{e.preventDefault();e.stopPropagation();setChatCtxMenu({x:e.clientX,y:e.clientY,item,isDM});}}
+                  onTouchStart={e=>handleChatLongPressStart(e,item,isDM)}
+                  onTouchEnd={handleChatLongPressEnd}
+                  onTouchMove={handleChatLongPressEnd}
                   className={`w-full flex items-center gap-3 px-3 py-3 hover:bg-[#2a3942] transition-colors border-b border-[#2a3942]/20 ${isActive?'bg-[#2a3942]':''} text-left`}>
                   <div className="relative flex-shrink-0">
                     {isDM

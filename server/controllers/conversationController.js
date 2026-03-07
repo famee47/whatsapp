@@ -19,7 +19,14 @@ exports.createOrGet = async (req, res) => {
 
 exports.getAll = async (req, res) => {
   try {
-    const convs = await Conversation.find({ participants: req.user._id })
+    // Get user's deleted chats list so we can filter them out
+    const me = await User.findById(req.user._id).select('deletedChats');
+    const deletedIds = me?.deletedChats || [];
+
+    const convs = await Conversation.find({
+      participants: req.user._id,
+      _id: { $nin: deletedIds }   // ← exclude chats user deleted
+    })
       .populate('participants', '_id username displayName profilePicture bio isOnline lastSeen')
       .populate({ path: 'lastMessage', populate: { path: 'senderId', select: '_id username' } })
       .sort({ updatedAt: -1 });
