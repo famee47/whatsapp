@@ -256,12 +256,8 @@ exports.clearChatHistory = async (req, res) => {
     const { conversationId, groupId } = req.body;
     const userId = req.user._id;
     const filter = conversationId ? { conversationId } : { groupId };
-
-    // Add current user to deletedFor for all messages
-    await Message.updateMany(
-      { ...filter, deletedFor: { $ne: userId } },
-      { $push: { deletedFor: userId } }
-    );
+    // Permanently hide all messages in this chat for this user
+    await Message.updateMany(filter, { $addToSet: { deletedFor: userId } });
     res.json({ ok: true });
   } catch { res.status(500).json({ message: 'Failed to clear chat.' }); }
 };
