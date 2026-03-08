@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Message = require('../models/Message');
 const bcrypt = require('bcryptjs');
 
 exports.searchUser = async (req, res) => {
@@ -118,12 +119,21 @@ exports.muteChat = async (req, res) => {
 exports.deleteChat = async (req, res) => {
   try {
     const { chatId } = req.body;
-    const me = await User.findById(req.user._id);
-    // Store as string to keep consistent
+    const userId = req.user._id;
+    const me = await User.findById(userId);
     const idStr = chatId.toString();
+
+    // Add to deletedChats list (so it stays hidden on refresh)
     if (!me.deletedChats.includes(idStr)) me.deletedChats.push(idStr);
     me.pinnedChats = me.pinnedChats.filter(id => id !== idStr);
     await me.save();
+
+    // PERMANENTLY hide all messages in this chat for this user
+    await Message.updateMany(
+      { conversationId: chatId },
+      { $addToSet: { deletedFor: userId } }
+    );
+
     res.json({ ok: true });
   } catch { res.status(500).json({ message: 'Failed to delete chat.' }); }
 };
